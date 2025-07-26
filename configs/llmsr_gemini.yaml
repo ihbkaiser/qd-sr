@@ -1,0 +1,8 @@
+name: Llmsr-Gemini
+class_name: LLMSRSearcher
+api_type: "gemini"
+api_model: "gemini-2.5-flash"
+api_url: ""
+global_max_sample_num: 1000
+samples_per_prompt: 4
+num_islands: 10

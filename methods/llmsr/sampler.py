@@ -530,3 +530,193 @@ class LocalLLM(LLM):
                     
 #             all_samples.append(response)
 #         return all_samples
+
+import google.generativeai as genai
+import concurrent.futures
+# class GeminiLLM(LLM):
+#     def __init__(self, 
+#                  samples_per_prompt: int, 
+#                  local_llm_url: str = None,  # Ignored for compatibility with LocalLLM
+#                  api_url: str = None,  # Ignored for compatibility
+#                  api_key: str = None,
+#                  batch_inference: bool = True, 
+#                  trim: bool = True) -> None:
+#         """
+#         Initialize the GeminiLLM class for generating equation program skeleton hypotheses using Gemini API.
+
+#         Args:
+#             samples_per_prompt: Number of samples to generate per prompt.
+#             local_llm_url: Ignored (for compatibility with LocalLLM).
+#             api_url: Ignored (for compatibility with LocalLLM).
+#             api_key: API key for Gemini API (defaults to environment variable Google_API_KEY).
+#             batch_inference: Use batch inference for generating multiple samples.
+#             trim: Whether to trim the equation program skeleton body from samples.
+#         """
+#         super().__init__(samples_per_prompt)
+#         self._api_key = api_key or os.getenv("Google_API_KEY")
+#         if not self._api_key:
+#             raise ValueError("Google_API_KEY must be set in environment or provided as api_key")
+#         genai.configure(api_key=self._api_key)
+#         self._model = genai.GenerativeModel('gemini-1.5-flash')  # Updated to latest model
+#         self._batch_inference = batch_inference
+#         self._trim = trim
+#         self._instruction_prompt = ("You are a helpful assistant tasked with discovering mathematical function structures for scientific systems. "
+#                                   "Complete the 'equation' function below, considering the physical meaning and relationships of inputs.\n\n")
+
+#     def draw_samples(self, prompt: str, config: config_lib.Config) -> Collection[str]:
+#         """Generates multiple equation program skeleton hypotheses for the given prompt."""
+#         prompt = '\n'.join([self._instruction_prompt, prompt])
+#         all_samples = []
+
+#         if self._batch_inference:
+#             response = self._do_request(prompt, config)
+#             all_samples.extend(response if isinstance(response, list) else [response])
+#         else:
+#             for _ in range(self._samples_per_prompt):
+#                 response = self._do_request(prompt, config)
+#                 all_samples.append(response)
+
+#         if self._trim:
+#             all_samples = [_extract_body(sample, config) for sample in all_samples]
+#         return all_samples
+
+#     async def async_draw_single_sample(self, prompt: str, config: config_lib.Config, timeout: float = None) -> str:
+#         """Asynchronously generates a single equation program skeleton hypothesis."""
+#         loop = asyncio.get_running_loop()
+#         with concurrent.futures.ThreadPoolExecutor() as pool:
+#             response = await loop.run_in_executor(pool, self._do_request, '\n'.join([self._instruction_prompt, prompt]), config)
+#         if self._trim:
+#             response = _extract_body(response, config)
+#         return response
+
+#     def _do_request(self, content: str, config: config_lib.Config) -> str:
+#         """Synchronous request to Gemini API."""
+#         content = content.strip('\n').strip()
+#         for _ in range(10):  # Retry logic
+#             try:
+#                 response = self._model.generate_content(
+#                     content,
+#                     generation_config={
+#                         'max_output_tokens': getattr(config, 'max_tokens', 1024),
+#                         'temperature': getattr(config, 'temperature', 2.0)
+#                     }
+#                 )
+#                 return response.text
+#             except Exception as e:
+#                 print(f"Attempt failed with error: {e}")
+#                 time.sleep(2)
+#         raise Exception("Failed to generate response after 10 attempts")
+import logging
+logging.basicConfig(
+    filename='gemini_llm_responses.txt',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+
+class GeminiLLM(LLM):
+    def __init__(self, 
+                 samples_per_prompt: int, 
+                 local_llm_url: str = None,  # Ignored for compatibility with LocalLLM
+                 api_url: str = None,  # Ignored for compatibility
+                 api_key: str = None,
+                 batch_inference: bool = True, 
+                 trim: bool = True) -> None:
+        """
+        Initialize the GeminiLLM class for generating equation program skeleton hypotheses using Gemini API.
+
+        Args:
+            samples_per_prompt: Number of samples to generate per prompt.
+            local_llm_url: Ignored (for compatibility with LocalLLM).
+            api_url: Ignored (for compatibility with LocalLLM).
+            api_key: API key for Gemini API (defaults to environment variable Google_API_KEY).
+            batch_inference: Use batch inference for generating multiple samples.
+            trim: Whether to trim responses.
+        """
+        super().__init__(samples_per_prompt)
+        self._api_key = api_key or os.getenv("Google_API_KEY")
+        if not self._api_key:
+            raise ValueError("Google_API_KEY must be set in environment or provided as api_key")
+        genai.configure(api_key=self._api_key)
+        self._model = genai.GenerativeModel('gemini-1.5-flash')  # Latest model
+        self._batch_inference = batch_inference
+        self._trim = trim
+        self._sample_counter = 0  # Track sample order
+        self._instruction_prompt = (
+            "You are a helpful assistant tasked with discovering mathematical function structures for scientific systems. "
+            "Generate a Python function 'equation' that computes the dipole moment based on the inputs. "
+            "Return the response as a JSON object with a 'function' key containing the complete Python function code as a string. "
+            "Consider the physical relationships between inputs and try diverse mathematical forms (e.g., polynomials, trigonometric, exponential). "
+            "Example response:\n"
+            "{\n"
+            "  \"function\": \"def equation(Ef: np.ndarray, epsilon: np.ndarray, theta: np.ndarray, r: np.ndarray, params: np.ndarray) -> np.ndarray:\\n"
+            "    \\\"\\\"\\\" Mathematical function for the dipole moment...\\\"\\\"\\\"\\n"
+            "    output = params[0] * Ef * epsilon * (r**3) / np.sin(2*theta)\\n"
+            "    return output\\n\"\n"
+            "}\n\n"
+            "Complete the 'equation' function below:\n"
+        )
+
+    def draw_samples(self, prompt: str, config: config_lib.Config) -> Collection[str]:
+        """Generates multiple equation program skeleton hypotheses for the given prompt."""
+        prompt = '\n'.join([self._instruction_prompt, prompt])
+        all_samples = []
+
+        if self._batch_inference:
+            response = self._do_request(prompt, config)
+            samples = self._parse_response(response, prompt)
+            all_samples.extend(samples if isinstance(samples, list) else [samples])
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                futures = [pool.submit(self._do_request, prompt, config) for _ in range(self._samples_per_prompt)]
+                for future in concurrent.futures.as_completed(futures):
+                    response = future.result()
+                    sample = self._parse_response(response, prompt)
+                    all_samples.append(sample)
+
+        if self._trim:
+            all_samples = [_extract_body(sample, config) for sample in all_samples]
+        return all_samples
+
+    async def async_draw_single_sample(self, prompt: str, config: config_lib.Config, timeout: float = None) -> str:
+        """Asynchronously generates a single equation program skeleton hypothesis."""
+        loop = asyncio.get_running_loop()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            response = await loop.run_in_executor(pool, self._do_request, '\n'.join([self._instruction_prompt, prompt]), config)
+        sample = self._parse_response(response, prompt)
+        if self._trim:
+            sample = _extract_body(sample, config)
+        return sample
+
+    def _do_request(self, content: str, config: config_lib.Config) -> str:
+        """Synchronous request to Gemini API."""
+        content = content.strip('\n').strip()
+        for attempt in range(10):  # Retry logic
+            try:
+                response = self._model.generate_content(
+                    content,
+                    generation_config={
+                        'max_output_tokens': getattr(config, 'max_tokens', 1024),
+                        'temperature': getattr(config, 'temperature', 1.5)  # Increased for diversity
+                    }
+                )
+                raw_response = response.text
+                logging.info(f"Sample {self._sample_counter}: Raw response:\n{raw_response}")
+                self._sample_counter += 1
+                return raw_response
+            except Exception as e:
+                logging.error(f"Sample {self._sample_counter}: Attempt {attempt + 1} failed with error: {e}")
+                time.sleep(2)
+        raise Exception("Failed to generate response after 10 attempts")
+
+    def _parse_response(self, response: str, prompt: str) -> str:
+        """Parses the Gemini response to extract the equation function."""
+        logging.info(f"Sample {self._sample_counter - 1}: Prompt:\n{prompt}")
+        try:
+            response_json = json.loads(response)
+            function = response_json.get('function', response)
+            logging.info(f"Sample {self._sample_counter - 1}: Parsed function:\n{function}")
+            return function
+        except json.JSONDecodeError:
+            logging.warning(f"Sample {self._sample_counter - 1}: JSON parsing failed, using raw response")
+            return response
